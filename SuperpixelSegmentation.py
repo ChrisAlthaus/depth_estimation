@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import math
  
 
+
 def getSlicSegmentation(imagePath, numberSegments):
 	"""
 	Get the Segmentation as a matrix with height and width of the image.
@@ -91,17 +92,14 @@ def drawLines(lines):
 	cLen = len(colors)
 	i=0
 	for ((x1,y1) , (x2,y2)) in lines:
-		
-		#print("plot=", x1 ,y1  , x2 , y2)
-		#print()
 		p1 = [x1,x2]
 		p2 = [y1,y2]
-		plt.plot( p1 , p2 ,marker='o',color= colors[int(i/3)%(cLen-1)] )
+		
 		#Choosing next color
+		#plt.plot( p1 , p2 ,marker='o',color= colors[int(i/3)%(cLen-1)] , linewidth=1 , markersize=3 )
+		plt.plot( p1 , p2 ,marker='o',color='k' ,linewidth=1,markersize=3 )
+		
 		i = i +1
-		if(i==3):
-			break
-
 		
 def calculateNearestNeighbors(points, k):
 	"""
@@ -113,7 +111,7 @@ def calculateNearestNeighbors(points, k):
 			
 	:return: list of line tuples ((x_p1,y_p1),(x_p2,y_p2))
 	"""
-	print("points = ",points )
+	#print("points = ",points )
 	lines= list()
 	for (x1,y1) in points:
 		distances = list()
@@ -126,29 +124,71 @@ def calculateNearestNeighbors(points, k):
 		#print("Sorted= ",distances[:10])
 		#Pick k elements with minimal distance
 		for i in range(k):
-			lines.append(( (x1,y1) , (distances[i][0],distances[i][1]) ))
+			#Round/cast to integer points
+			p1 = (int(x1),int(y1))
+			p2 = (int(distances[i][0]),int(distances[i][1]))
+			
+			lines.append((p1,p2))
 		
-	print("Lines= ",lines)
-	print()
+	#print("Lines= ")
+	#for i in lines:
+	#	print(i)
+	#print()
 	
 	return lines
 	
+def calcSegmentation(imagePath):
+	"""
+	Sets the parameters for the segmentation and line element computation 
+	and launches the computations.
 	
-def main():	
+	:return: (segmentation centroids list, edges list )
+	"""
 	numberSegments = 300
-	segments = getSlicSegmentation("living_room_small.jpg",numberSegments);
+	segments = getSlicSegmentation(imagePath,numberSegments);
 	
 	segmentCentroids = getSegmentsCenters(segments,numberSegments);
 	drawCentroids(segmentCentroids)
 	
+	#Choose k nearest neighbours for edge computation
 	k=3
 	lines = calculateNearestNeighbors(segmentCentroids, k)
 	drawLines(lines)
 	
+	#Get integer point coordinates
+	points = list()
+	for (x,y) in segmentCentroids:
+		points.append((int(x),int(y)))
+		
+		
+	return (points,lines)
+
+def getPixelValues(points,imagePath):
+	"""
+	Computes the greyscale values of each given point and returns these.
+	
+	:param: centroids list of centroids in float format
+			imagePath local path to image
+			
+	:return: list of greyscale values 
+	"""
+	values = list()
+	# load the image and convert it to a greyscale image
+	image = io.imread(imagePath, as_gray=True)
+	
+	
+	for p in points:
+		x = p[0]
+		y = p[1]
+		values.append(image[x][y])
+	
+	#print("Integer Points=", points)
+	print("Image=",image)
+	
+	return values
+	
+def showPlot():
 	# show the plot
 	plt.show()
-	print("Centroids= ",segmentCentroids)
-	print()
-	
-if __name__ == "__main__":
-    main()
+	#print("Centroids= ",segmentCentroids)
+	#print()
