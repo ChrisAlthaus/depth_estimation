@@ -32,8 +32,8 @@ def getSlicSegmentation(imagePath, numberSegments):
 	plt.axis("off")
 	
 	# Printing for validation
-	for i in range(len(segments)):
-		print("segements list[",i,"] = " , segments[i][:24]);
+	#for i in range(len(segments)):
+	#	print("segements list[",i,"] = " , segments[i][:24]);
 	
 	
 	return segments;
@@ -46,7 +46,8 @@ def getSegmentsCenters(segment_matrix,numSegments):
 	
 	:param 	segment_matrix: Segementation matrix [heigth][width]
 			numSegments: Number of segments in the matrix
-	:return: List of segement centroids ([(s0_x,s0_y),...,(sn_x,sn_y)])
+	:return: List of segment centroids ([(s0_x,s0_y),...,(sn_x,sn_y)]),
+			 sorted by occurance of segments in row-wise processing
 	"""
 	segment_centroids = list()
 	
@@ -140,9 +141,9 @@ def calculateNearestNeighbors(points, k):
 def calcSegmentation(imagePath):
 	"""
 	Sets the parameters for the segmentation and line element computation 
-	and launches the computations.
+	and launches the computations. 
 	
-	:return: (segmentation centroids list, edges list )
+	:return: (segmentation centroids list, edges list ,mean luminance value list)
 	"""
 	numberSegments = 300
 	segments = getSlicSegmentation(imagePath,numberSegments);
@@ -155,14 +156,47 @@ def calcSegmentation(imagePath):
 	lines = calculateNearestNeighbors(segmentCentroids, k)
 	drawLines(lines)
 	
-	#Get integer point coordinates
+	#Get integer point coordinates to match edges aka lines coordinates
 	points = list()
 	for (x,y) in segmentCentroids:
 		points.append((int(x),int(y)))
 		
+	meanLuminances = getMeanSegmentLuminance(segments, numberSegments, imagePath)
 		
-	return (points,lines)
-
+		
+	return (points,lines,meanLuminance)
+	
+def getMeanSegmentLuminance(segment_matrix, numSegments, imagePath):
+	"""
+	Computes the mean luminance of each segment respectively superpixel.
+	
+	:param:	segment_matrix 	segmentation matrix [height][width]
+			numSegments	   	number of segments
+			imagePath 		path to the image
+	
+	:return: list of mean greylevel values with index = segement number,
+			 sorted by occurance of segments in row-wise processing
+	"""
+	# load the image and convert it to a greyscale image
+	image = io.imread(imagePath, as_gray=True)
+	
+	#(x,y) : x= sum of luminance, y= number of points (in this segment)
+	tmp = (0,0)* numSegments
+	
+	for i in range(len(segment_matrix)):
+		for j in range(len(segment_matrix[i])):
+			index = segement_matrix[i][j]
+			tmp[index][0] = tmp[index][0] + image[i][j]
+			tmp[index][1] = tmp[index][1] + 1
+	
+	meanLuminance = list()
+	
+	for (sum,count) in tmp:
+		meanLuminance.append(sum/count)
+		
+	return meanLuminance
+	
+	
 def getPixelValues(points,imagePath):
 	"""
 	Computes the greyscale values of each given point and returns these.
