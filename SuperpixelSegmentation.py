@@ -162,15 +162,46 @@ def calcSegmentation(imagePath):
 		points.append((int(x),int(y)))
 		
 	meanLuminances = getMeanSegmentLuminance(segments, numberSegments, imagePath)
-		
-		
-	return (points,lines,meanLuminance)
 	
-def getMeanSegmentLuminance(segment_matrix, numSegments, imagePath):
+	return (points,lines,segments,meanLuminances)
+	
+def floodfillImage(superpixels,fillValues,imagePath):
+	"""
+	Used to fill the superpixels in the image with the computed values 
+	from the optimization algorithm.
+
+	:param:	superpixels segmentation matrix, fit to image width and height
+			fillValues	list with segment no. -> greylevel ( 1=white , 0=black)
+			imagePath 	path to the image
+	"""
+	# load the image and convert it to a greyscale image
+	image = io.imread(imagePath, as_gray=True)
+	
+	print("image=\n",image)
+	
+	imgHeight = len(image)
+	imgWidth = len(image[0])
+	
+	print("Segementation matrix:",superpixels)
+	
+	for i in range(imgHeight):
+		for j in range(imgWidth):
+			segmentNumber = superpixels[i][j]
+			image[i][j] = fillValues[segmentNumber]
+	
+	print("image=\n",image)		
+	# show the output of SLIC
+	fig = plt.figure("Superpixels -- %d segments painted" % len(fillValues) )
+	plt.imshow(image,cmap='gray',vmin=0,vmax=1)
+	
+	plt.axis("off")
+	
+	
+def getMeanSegmentLuminance(segmentMatrix, numSegments, imagePath):
 	"""
 	Computes the mean luminance of each segment respectively superpixel.
 	
-	:param:	segment_matrix 	segmentation matrix [height][width]
+	:param:	segmentMatrix 	segmentation matrix [height][width]
 			numSegments	   	number of segments
 			imagePath 		path to the image
 	
@@ -181,11 +212,12 @@ def getMeanSegmentLuminance(segment_matrix, numSegments, imagePath):
 	image = io.imread(imagePath, as_gray=True)
 	
 	#(x,y) : x= sum of luminance, y= number of points (in this segment)
-	tmp = (0,0)* numSegments
+	tmp = [[0,0]]* numSegments
+	print(tmp)
 	
-	for i in range(len(segment_matrix)):
-		for j in range(len(segment_matrix[i])):
-			index = segement_matrix[i][j]
+	for i in range(len(segmentMatrix)):
+		for j in range(len(segmentMatrix[i])):
+			index = segmentMatrix[i][j]
 			tmp[index][0] = tmp[index][0] + image[i][j]
 			tmp[index][1] = tmp[index][1] + 1
 	

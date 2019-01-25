@@ -1,6 +1,7 @@
 import math
 import numpy as np
 import SuperpixelSegmentation as s
+import ProblemSolver as solv
 from skimage import io
 
 
@@ -24,11 +25,11 @@ def computeL2Dist(xVector,A_xy,R_xy,W_xy):
 	
 	#Printing matrices and dimensions
 	print()
-	print("x=" , xVector)
-	print("R_xy=" , R_xy)
-	print("->xR_xy=" , xR_xy)
-	print("A_xy=" , A_xy)
-	print("W_xy=" , W_xy)
+	print("x= \n" , xVector)
+	print("R_xy \n=" , R_xy)
+	print("->xR_xy= \n" , xR_xy)
+	print("A_xy= \n" , A_xy)
+	print("W_xy= \n" , W_xy)
 	
 	print("dimensions R_xy=" , len(R_xy))
 	print("dimensions xR_xy=" , xR_xy.shape)
@@ -36,7 +37,7 @@ def computeL2Dist(xVector,A_xy,R_xy,W_xy):
 	print("dimensions W_xy=" , W_xy.shape)
 	
 	#Computing dot products
-	result = A_xy.dot(xR_xy)	#works?
+	result = A_xy.dot(xR_xy)
 	#print("A * xR=" , result)
 	print("dimensions A * xR=" , result.shape)
 	result = W_xy.dot(result)
@@ -61,22 +62,23 @@ def computeSmoothTerm(xVector,A_s,W_s,b_s):
 	Resulting formula= x^T * ( A_s^T * ( W_s * ( A_s * x ))) + x^T * b_s
 	
 	:param:	xVector greyscale values of nodes
+			A_s 	multiplication help matrix
 			W_s 	matrix of smoothness weights
-			b_s		vector for more flexible smoothing
+			b_s		vector (format = list) for more flexible smoothing, size=|N|
 			
 	:return smoothness value
 	"""
 	
 	#Printing matrices and dimensions
 	print()
-	print("x=" , xVector)
-	print("A_s=" , A_s)
-	print("W_s=" , W_s)
-	print("b_s=" , b_s)
+	print("x= \n" , xVector)
+	print("A_s= \n" , A_s)
+	print("W_s= \n" , W_s)
+	print("b_s= \n" , b_s)
 	
 	print("dimensions A_s=" , len(A_s))
 	print("dimensions W_s=" , W_s.shape)
-	print("dimensions b_s=" , b_s.shape)
+	print("dimensions b_s=" , len(b_s))
 	
 	x = np.array(xVector)
 	
@@ -89,7 +91,7 @@ def computeSmoothTerm(xVector,A_s,W_s,b_s):
 	result = (x.transpose()).dot(result)
 	print("dimensions x^T * A_s^T * W_s * A_s * x=" , result.shape)
 	
-	result = result + (x.transpose()).dot(b_s) #TODO: right multiplication?
+	result = result + (x.transpose()).dot(b_s)
 	print("dimensions A_s^T * W_s * A_s * x + x^T * b_s=" , result.shape)
 	
 	
@@ -121,6 +123,7 @@ def getWeigthMatrices(nodes, edges,imagePath,meanLuminances):
 	W_gt = np.zeros([numEdges, numEdges], dtype=float)
 	W_lt = np.zeros([numEdges, numEdges], dtype=float)
 	W_eq = np.zeros([numEdges, numEdges], dtype=float)
+	W_s = np.zeros([numEdges, numEdges], dtype=float)
 	
 	edgeIndex=0
 	
@@ -134,8 +137,11 @@ def getWeigthMatrices(nodes, edges,imagePath,meanLuminances):
 	
 		edgeIndex = edgeIndex + 1
 	
+	#Smoothing parameter
+	p = 1
+	
 	#Index of current edge
-	p = 0
+	edgeIndex=0
 	#Fill the matrix W_s
 	for ((x0,y0),(x1,y1)) in edges:
 		#Find index i,j = position of points in node list
@@ -145,7 +151,9 @@ def getWeigthMatrices(nodes, edges,imagePath,meanLuminances):
 		lum_p0 = meanLuminances[i_pos]
 		lum_p1 = meanLuminances[j_pos]
 		
-		W_s[p][p] = math.exp( (-1/p) * (abs( lum_p0 - lum_p1 ))**2 )
+		W_s[edgeIndex][edgeIndex] = math.exp( (-1/p) * (abs( lum_p0 - lum_p1 ))**2 )
+		
+		edgeIndex = edgeIndex +1
 		
 
 		
@@ -189,7 +197,7 @@ def getMatricesA(nodes,edges):
 	:param:	nodes	list of segments centroids
 			edges 	list of edges
 			
-	:return: (A_gt, A_lt, A_eq)
+	:return: (A_gt, A_lt, A_eq, A_s)
 	"""
 	
 	numEdges = len(edges)
@@ -198,10 +206,11 @@ def getMatricesA(nodes,edges):
 	#A_xy : |E| x |N|+|E|
 	A_gt = np.zeros([numEdges, numNodes + numEdges],dtype="float64")
 	A_lt = np.zeros([numEdges, numNodes + numEdges],dtype="float64")
+	A_s = np.zeros([numEdges, numNodes],dtype="float64")
 	
 	#Index of current edge
 	p = 0
-	#Fill the matrix A_gt
+	#Fill the matrix A_gt ( size=|E|x|E|+|N| )
 	for ((x0,y0),(x1,y1)) in edges:
 		#Find index i,j = position of points in node list
 		i_pos = nodes.index((x0,y0)) 
@@ -214,14 +223,28 @@ def getMatricesA(nodes,edges):
 		p = p + 1
 	
 	#Set A_lt = - A_gt
-	for row in A_gt.shape[0]:
-		for col in A_gt.shape[1]:
-			A_lt[row][col] = A_gt[row][col] * (-1);
+	for row in range(A_gt.shape[0]):
+		for col in range(A_gt.shape[1]):
+			if(A_lt[row][col]!= 0):
+				A_lt[row][col] = A_gt[row][col] * (-1);
 	
 	#A_eq == A_gt
 	A_eq = np.copy(A_gt)
 	
-	return (A_gt, A_lt, A_eq)
+	#Index of current edge
+	p = 0
+	#Fill the matrix A_s ( size=|E|x|N| )
+	for ((x0,y0),(x1,y1)) in edges:
+		#Find index i,j = position of points in node list
+		i_pos = nodes.index((x0,y0)) 
+		j_pos = nodes.index((x1,y1)) 
+		
+		A_s[p][i_pos] = 1
+		A_s[p][j_pos] = -1
+		
+		p = p + 1
+	
+	return (A_gt, A_lt, A_eq, A_s)
 	
 def runningTests():
 	"""
@@ -231,44 +254,90 @@ def runningTests():
 	
 	#Test 1 Setup: two nodes, one connecting edge
 	#Correct result: 0.25
+	print("Test 1:")
 	nodes = [(0,0),(100,100)]
 	edges = [( (0,0),(100,100) )] 
 	xVector= [1,0.5] #aka pixel intensities
 	R_gt = [1]
+	
 	numEdges = len(edges)
+	(A_gt, A_lt, A_eq, A_s) = getMatricesA(nodes,edges)
+	print("A_gt= \n", A_gt , "\n")
+	print("A_lt= \n", A_lt, "\n")
+	print("A_eq= \n", A_eq, "\n")
+	print("A_s= \n", A_s, "\n")
+	
 	W_gt = np.zeros([numEdges, numEdges],dtype="float64")
 	W_gt[0][0] = 1	#(x0,y0)> (x1,y1)
 	
-	res = computeL2DistGT(xVector,R_gt,W_gt,nodes,edges)
+	res = computeL2Dist(xVector,A_gt,R_gt,W_gt)
+	print("L2DistGT=", res)
 	
 	#Test 2 Setup: four nodes, four edges 
-	#Correct result: 2.925
+	#Correct results: 
+	#		L2DistGT = 2.925
+	#		SmoothTerm = 0.045
+	print("Test 2:")
 	nodes = [(0,0),(0,100),(100,100),(100,0)]
 	edges = [( (0,0),(0,100) ), ( (0,100),(100,100) ), 
 			 ( (100,100),(100,0) ), ( (100,0), (0,0) )] 
 	xVector= [0.1,0.2,0.4,0.4] #aka pixel intensities
 	R_gt = [1,1,1,1]
+	
 	numEdges = len(edges)
+	(A_gt, A_lt, A_eq, A_s) = getMatricesA(nodes,edges)
+	print("A_gt= \n", A_gt , "\n")
+	print("A_lt= \n", A_lt, "\n")
+	print("A_eq= \n", A_eq, "\n")
+	print("A_s= \n", A_s, "\n")
+	
 	W_gt = np.zeros([numEdges, numEdges], dtype="float64")
 	W_gt[0][0] = 0.8	#P1>P2
 	W_gt[1][1] = 0.7	#P2>P3
 	W_gt[2][2] = 0.9	#P3>P4
 	W_gt[3][3] = 0.1	#P4>P1
 	
-	res = computeL2DistGT(xVector,R_gt,W_gt,nodes,edges)
+	W_s = np.copy(W_gt)
 	
+	b_s = [0,0,0,0]
+	
+	res = computeL2Dist(xVector,A_gt,R_gt,W_gt)
+	print("L2DistGT= ",res)
+	
+	res= computeSmoothTerm(xVector,A_s,W_s,b_s)
+	print("SmoothTerm= ",res)
+	
+	#Test 3: Test e-function calculation
+	#Correct result = 0.999000499833375
+	print("calculation:" ,math.exp( (-1/10) * (abs( 0.8 - 0.9 ))**2 ))
+	
+	
+def matrixMulTest():
+	
+	x = [1,0,1,0]
+	x_array = np.array(x)
+	y = [1,2,3,4]
+	y_array = np.array(y)
+	
+	result = x_array.transpose().dot(y)
+	print("x^t * y : ")
+	print(x_array.transpose() , " * " ,y_array , " = " , result )
+
+
 def main():
+	#runningTests()
+	
 	imagePath = "living_room_small.jpg"
-	(points, lines, meanLuminances) = s.calcSegmentation(imagePath)
+	(points, lines, segmentMatrix, meanLuminances) = s.calcSegmentation(imagePath)
 	
 	#runningTests()
 	print(points)
 	print(lines)
 	
 	xVector = s.getPixelValues(points,imagePath)
-	(W_gt,W_lt,W_eq) = getWeigthMatrices(lines,imagePath,meanLuminances)
-	(R_gt,R_lt,R_eq) = getSlackVariables(lines)
-	(A_gt, A_lt, A_eq) = getMatricesA(nodes,edges)
+	(W_gt, W_lt, W_eq, W_s) = getWeigthMatrices(points,lines,imagePath,meanLuminances)
+	(R_gt, R_lt, R_eq) = getSlackVariables(lines)
+	(A_gt, A_lt, A_eq, A_s) = getMatricesA(points,lines)
 	
 	#print("xVector=",xVector)
 	print("xVector length=",len(xVector))
@@ -281,7 +350,13 @@ def main():
 	print("distGT=",distGT)
 	#print("distLT=",distLT)
 	#print("distEQ=",distEQ)
+	
+	numSegments = len(meanLuminances)
+	xSolution = solv.solveProblem(numSegments)
+	
+	s.floodfillImage(segmentMatrix,xSolution,imagePath)
 
+	s.showPlot()
 	
 if __name__ == "__main__":
     main()
