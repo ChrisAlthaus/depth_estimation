@@ -192,6 +192,7 @@ class QuadraticProblem:
 		
 		return b_s
 		
+	counter = 0
 	
 	def calc(self,x0,y0,x1,y1,image):
 		"""
@@ -199,7 +200,10 @@ class QuadraticProblem:
 		
 		:return: (probability p0>p1 ,probability p1>p0)
 		"""
-		return (0.2,0.8)
+		
+		p1 = self.counter/(len(self.superpixels.segments)*3)
+		self.counter = self.counter + 1
+		return (p1,1-p1)
 		
 	def getTestSlackVariables(self): #TODO: not used?
 		"""
@@ -224,9 +228,9 @@ class QuadraticProblem:
 		
 		numEdges = len(self.superpixels.edges)
 		
-		R_gt = [1] * numEdges;
-		R_lt = [1] * numEdges;
-		R_eq = [1] * numEdges;
+		R_gt = np.array([1] * numEdges, dtype='f');
+		R_lt = np.array([1] * numEdges, dtype= 'f');
+		R_eq = np.array([1] * numEdges, dtype= 'f');
 		
 		return (R_gt,R_lt,R_eq)
 
@@ -388,6 +392,7 @@ class QuadraticProblem:
 		Saves the implicit weight and helper matrices locally.
 		"""
 		
+		#Calculates segmentation, superpixel centroids and mean luminances 
 		self.superpixels.calcSegmentation()
 		
 		nodes = self.superpixels.nodes

@@ -28,6 +28,7 @@ class SuperpixelSegmentation:
 	imageSolution = None
 	
 	numSegments = None
+	maxNumSegments = None #todo comment
 	segments = None
 	meanLuminances = list()
 	k = 3
@@ -36,9 +37,9 @@ class SuperpixelSegmentation:
 	edges = list()
 	
 	
-	def __init__(self, imagePath, numSegments):
+	def __init__(self, imagePath, maxNumSegments):
 		self.imagePath = imagePath
-		self.numSegments = numSegments
+		self.maxNumSegments = maxNumSegments
 		
 		self.loadImages()
 		
@@ -60,13 +61,16 @@ class SuperpixelSegmentation:
 	def slicSegmentation(self):
 		"""
 		Calculates the Segmentation as a matrix with height and width of the image.
-		Matrix entries are the number of the segementation.
+		Matrix entries are the number of the segementation. 
+		Sets number of segments (class variable) with reference to actual found segments.
 	
 		"""
 		
 		# apply SLIC and extract (approximately) the supplied number of segments
-		segments = slic(self.imageRaw, n_segments = self.numSegments, sigma = 5)
+		segments = slic(self.imageRaw, n_segments = self.maxNumSegments, sigma = 5)
 		self.segments = segments
+		
+		self.setNumberSegments()
 		
 		# show the output of SLIC
 		fig = plt.figure("Superpixels -- %d segments" % (self.numSegments))
@@ -77,7 +81,26 @@ class SuperpixelSegmentation:
 		# Printing for validation
 		#for i in range(len(segments)):
 		#	print("segements list[",i,"] = " , segments[i][:24]);
-
+    
+	
+	def setNumberSegments(self):
+		"""
+		Used to compute the actual number of segments from the segmentation matrix.
+		"""
+		
+		#Stores the unique segment index
+		tmp = list()
+		
+		for i in range(len(self.segments)):
+			for j in range(len(self.segments[i])):
+				index = self.segments[i][j]
+				
+				if index not in tmp:
+					tmp.append(index)
+				
+		self.numSegments = len(tmp)
+	
+	
 	def segmentsCenters(self):
 		"""
 		Returns a list of the segments centroids, with data from the segment_matrix.
@@ -89,13 +112,16 @@ class SuperpixelSegmentation:
 		# Temp list to compute the centroids [(s0_sumx,s0_sumy,s0_no_pixels),...,(sn_sumx,sn_sumy,sn_no_pixels)]
 		# tmp = [[0,0,0]] * numSegments
 		tmp = list()
+		print("Number of segments=", self.numSegments)
 		
 		for i in range(self.numSegments):
 			tmp.append([0,0,0])
 
 		for i in range(len(self.segments)):
 			for j in range(len(self.segments[i])):
-				index = self.segments[i][j] #number of the segement
+				
+				index = self.segments[i][j] #number of the segment
+				#print("index=",index)
 				
 				tmp[index][0] = tmp[index][0] + j # j=x axis
 				tmp[index][1] = tmp[index][1]+ i	# i=y axis
@@ -189,9 +215,10 @@ class SuperpixelSegmentation:
 		#Determine mean superpixel/segement luminances
 		self.meanSegmentLuminance()
 		
+		
 		return (self.nodes,self.edges,self.segments,self.meanLuminances)
 		
-	def floodfillImage(self, fillValues):
+	def floodfillImage(self, fillValues, pNumber):
 		"""
 		Used to fill the superpixels in the image with the computed values 
 		from the optimization algorithm.
@@ -216,7 +243,7 @@ class SuperpixelSegmentation:
 		#print("Resulting image=\n",self.imageSolution)		
 		
 		# show the output of SLIC
-		fig = plt.figure("Superpixels -- %d segments painted" % len(fillValues) )
+		fig = plt.figure("Superpixels %d -- %d segments painted" % (pNumber,len(fillValues)) )
 		plt.imshow(self.imageSolution,cmap='gray',vmin=0,vmax=1)
 		
 		plt.axis("off")
@@ -232,15 +259,16 @@ class SuperpixelSegmentation:
 		segmentMatrix = self.segments
 		
 		#(x,y) : x= sum of luminance, y= number of points (in this segment)
-		tmp = [[0,0]]* self.numSegments
-		print(tmp)
-		
+		tmp = [[0,0] for i in range(self.numSegments)]
+	
 		for i in range(len(segmentMatrix)):
-			for j in range(len(segmentMatrix)):
+			for j in range(len(segmentMatrix[i])):
 				index = segmentMatrix[i][j]
+				
 				tmp[index][0] = tmp[index][0] + self.imageGrey[i][j]
 				tmp[index][1] = tmp[index][1] + 1
-		
+	
+	
 		for (sum,count) in tmp:
 			self.meanLuminances.append(sum/count)
 		
