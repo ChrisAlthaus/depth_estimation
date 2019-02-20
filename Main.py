@@ -2,7 +2,7 @@ from SuperpixelSegmentation import SuperpixelSegmentation
 from QuadraticProblem import QuadraticProblem
 from  ProblemSolver import ProblemSolver
 
-import TfOptimization as tfSrc
+#import TfOptimization as tfSrc
 
 
 def main():

@@ -27,99 +27,7 @@ class QuadraticProblem:
 		self.superpixels = superpixels
 		self.setupEnvironment()
 
-	def computeL2Dist(self,xVector,R_xy,A_xy,W_xy):
-		"""
-		Computes the L2 distance between corresponding points(edge).
-		Calculates result by matrix-multiplication from right to left.
-		Resulting formula= [x,R_gt]^T * ( A_gt^T * ( W_gt * ( A_gt * [x,R_gt] )))
-		
-		:param: xVector greyscale values of nodes
-				R_xy 	slack variable for each edge (GT,LT or EQ)
-				A_xy	multiplication help matrix
-				W_xy	weights matrix (GT,LT or EQ)
-				
-		:return: L2 distance
-		"""
-		
-		#xR_xy : |N|+|E| x 1 (vector?)
-		#xVector size = |N| , R_xy size = |E|
-		xR_xy = np.array(xVector + R_xy)
-		
-		#Printing matrices and dimensions
-		print()
-		print("x= \n" , xVector)
-		print("R_xy \n=" , R_xy)
-		print("->xR_xy= \n" , xR_xy)
-		print("A_xy= \n" , A_xy)
-		print("W_xy= \n" , W_xy)
-		
-		print("dimensions x=" , len(xVector))
-		print("dimensions R_xy=" , len(R_xy))
-		print("dimensions xR_xy=" , xR_xy.shape)
-		print("dimensions A_xy=" , A_xy.shape)
-		print("dimensions W_xy=" , W_xy.shape)
-		
-		#Computing dot products
-		result = A_xy.dot(xR_xy)
-		#print("A * xR=" , result)
-		print("dimensions A * xR=" , result.shape)
-		result = W_xy.dot(result)
-		#print("W * A * xR=" , result)
-		print("dimensions W * A * xR=" , result.shape)
-		result = (A_xy.transpose()).dot(result)
-		#print("A^T * W * A * xR=" , result)
-		print("dimensions A^T * W * A * xR=" , result.shape)
-		result = (xR_xy.transpose()).dot(result)
-		#print("xR^T * A^T * W * A * xR=" , result)
-		print("dimensions xR^T * A^T * W * A * xR=" , result.shape)
-		print("->xR=" , xR_xy.transpose())
-		print("result=",result)
-		print()
-		
-		return result
-		
-	def computeSmoothTerm(self,xVector,A_s,W_s,b_s):
-		"""
-		Computes the smoothness term. Allows to enforce smoothness in the image.
-		Calculates result by matrix-multiplication from right to left.
-		Resulting formula= x^T * ( A_s^T * ( W_s * ( A_s * x ))) + x^T * b_s
-		
-		:param:	xVector greyscale values of nodes
-				A_s 	multiplication help matrix
-				W_s 	matrix of smoothness weights
-				b_s		vector (format = list) for more flexible smoothing, size=|N|
-				
-		:return smoothness value
-		"""
-		
-		#Printing matrices and dimensions
-		print()
-		print("x= \n" , xVector)
-		print("A_s= \n" , A_s)
-		print("W_s= \n" , W_s)
-		print("b_s= \n" , b_s)
-		
-		print("dimensions A_s=" , len(A_s))
-		print("dimensions W_s=" , W_s.shape)
-		print("dimensions b_s=" , len(b_s))
-		
-		x = np.array(xVector)
-		
-		result = A_s.dot(x)
-		print("dimensions A_s * x=" , result.shape)
-		result = W_s.dot(result)
-		print("dimensions W_s * A_s * x=" , result.shape)
-		result = (A_s.transpose()).dot(result)
-		print("dimensions A_s^T * W_s * A_s * x=" , result.shape)
-		result = (x.transpose()).dot(result)
-		print("dimensions x^T * A_s^T * W_s * A_s * x=" , result.shape)
-		
-		result = result + (x.transpose()).dot(b_s)
-		print("dimensions A_s^T * W_s * A_s * x + x^T * b_s=" , result.shape)
-		
-		
-		return result
-		
+
 		
 	def getWeigthMatrices(self,nodes, edges, meanLuminances):
 		"""
@@ -188,7 +96,7 @@ class QuadraticProblem:
 		:return: b_s 	vector/list of size |number nodes|
 		"""
 		numNodes = len(self.superpixels.nodes)
-		b_s = [0] * numNodes	#TODO: how to compute this term??
+		b_s = [1] * numNodes	#TODO: how to compute this term??
 		
 		return b_s
 		
@@ -201,13 +109,15 @@ class QuadraticProblem:
 		:return: (probability p0>p1 ,probability p1>p0)
 		"""
 		
-		p1 = self.counter/(len(self.superpixels.segments)*3)
-		self.counter = self.counter + 1
-		return (p1,1-p1)
+		#p1 = self.counter/(len(self.superpixels.segments)*3)
+		#self.counter = self.counter + 1
+		#return (p1,1-p1)
 		
-	def getTestSlackVariables(self): #TODO: not used?
+		return(0.5,0.5)
+		
+	def getSlackVariables(self): 
 		"""
-		Get a slack variables for each edge. 
+		Get a test slack variables for each edge. 
 		Computed with different normal distributions.
 		
 		:param: edges list of edges
@@ -216,21 +126,26 @@ class QuadraticProblem:
 				  slack vector for equals)
 		"""
 		
-		stdDevGT= 0.001
-		stdDevLT= 0.001
-		stdDevEQ= 0.001
+		stdDevGT= math.pow(0.001,2)
+		stdDevLT= math.pow(0.001,2)
+		stdDevEQ= math.pow(0.001,2)
 		
-		meanGT= math.log(2)
-		meanLT= math.log(2)
+		meanGT= math.log(2,10)
+		meanLT= math.log(2,10)
 		meanEQ= 0
 		
-		#TODO: how compute slack variables with normal distribution (mapping?)
-		
 		numEdges = len(self.superpixels.edges)
+	
+		R_gt = np.random.normal(meanGT, stdDevGT, numEdges)
+		R_lt = np.random.normal(meanLT, stdDevLT, numEdges)
+		R_eq = np.random.normal(meanEQ, stdDevEQ, numEdges)
 		
-		R_gt = np.array([1] * numEdges, dtype='f');
-		R_lt = np.array([1] * numEdges, dtype= 'f');
-		R_eq = np.array([1] * numEdges, dtype= 'f');
+		#R_gt and R_lt should be positive-valued
+		for i in range(numEdges):
+			if R_gt[i] < 0:
+				R_gt[i] = 0
+			if R_lt[i] < 0:
+				R_lt[i] = 0
 		
 		return (R_gt,R_lt,R_eq)
 
@@ -288,7 +203,8 @@ class QuadraticProblem:
 			p = p + 1
 		
 		return (A_gt, A_lt, A_eq, A_s)
-		
+	
+	
 	def runningTests(self):
 		"""
 		Runs L2 distance computation with different setups. 
@@ -354,9 +270,10 @@ class QuadraticProblem:
 		#Correct result = 0.999000499833375
 		print("calculation:" ,math.exp( (-1/10) * (abs( 0.8 - 0.9 ))**2 ))
 		
-		
 	def matrixMulTest(self):
-		
+		"""
+		Testing.
+		"""
 		x = [1,0,1,0]
 		x_array = np.array(x)
 		y = [1,2,3,4]
@@ -365,8 +282,101 @@ class QuadraticProblem:
 		result = x_array.transpose().dot(y)
 		print("x^t * y : ")
 		print(x_array.transpose() , " * " ,y_array , " = " , result )
-
-	def compL2Distances(self,xVector, R_eq , R_gt , R_lt):
+	
+	def computeL2DistNumPy(self,xVector,R_xy,A_xy,W_xy):
+		"""
+		Computes the L2 distance between corresponding points(edge).
+		Calculates result by matrix-multiplication from right to left.
+		Resulting formula= [x,R_gt]^T * ( A_gt^T * ( W_gt * ( A_gt * [x,R_gt] )))
+		
+		:param: xVector greyscale values of nodes
+				R_xy 	slack variable for each edge (GT,LT or EQ)
+				A_xy	multiplication help matrix
+				W_xy	weights matrix (GT,LT or EQ)
+				
+		:return: L2 distance
+		"""
+		
+		#xR_xy : |N|+|E| x 1 (vector?)
+		#xVector size = |N| , R_xy size = |E|
+		xR_xy = np.array(xVector + R_xy)
+		
+		#Printing matrices and dimensions
+		print()
+		print("x= \n" , xVector)
+		print("R_xy \n=" , R_xy)
+		print("->xR_xy= \n" , xR_xy)
+		print("A_xy= \n" , A_xy)
+		print("W_xy= \n" , W_xy)
+		
+		print("dimensions x=" , len(xVector))
+		print("dimensions R_xy=" , len(R_xy))
+		print("dimensions xR_xy=" , xR_xy.shape)
+		print("dimensions A_xy=" , A_xy.shape)
+		print("dimensions W_xy=" , W_xy.shape)
+		
+		#Computing dot products
+		result = A_xy.dot(xR_xy)
+		#print("A * xR=" , result)
+		print("dimensions A * xR=" , result.shape)
+		result = W_xy.dot(result)
+		#print("W * A * xR=" , result)
+		print("dimensions W * A * xR=" , result.shape)
+		result = (A_xy.transpose()).dot(result)
+		#print("A^T * W * A * xR=" , result)
+		print("dimensions A^T * W * A * xR=" , result.shape)
+		result = (xR_xy.transpose()).dot(result)
+		#print("xR^T * A^T * W * A * xR=" , result)
+		print("dimensions xR^T * A^T * W * A * xR=" , result.shape)
+		print("->xR=" , xR_xy.transpose())
+		print("result=",result)
+		print()
+		
+		return result
+		
+	def computeSmoothTermNumPy(self,xVector,A_s,W_s,b_s):
+		"""
+		Computes the smoothness term. Allows to enforce smoothness in the image.
+		Calculates result by matrix-multiplication from right to left.
+		Resulting formula= x^T * ( A_s^T * ( W_s * ( A_s * x ))) + x^T * b_s
+		
+		:param:	xVector greyscale values of nodes
+				A_s 	multiplication help matrix
+				W_s 	matrix of smoothness weights
+				b_s		vector (format = list) for more flexible smoothing, size=|N|
+				
+		:return smoothness value
+		"""
+		
+		#Printing matrices and dimensions
+		print()
+		print("x= \n" , xVector)
+		print("A_s= \n" , A_s)
+		print("W_s= \n" , W_s)
+		print("b_s= \n" , b_s)
+		
+		print("dimensions A_s=" , len(A_s))
+		print("dimensions W_s=" , W_s.shape)
+		print("dimensions b_s=" , len(b_s))
+		
+		x = np.array(xVector)
+		
+		result = A_s.dot(x)
+		print("dimensions A_s * x=" , result.shape)
+		result = W_s.dot(result)
+		print("dimensions W_s * A_s * x=" , result.shape)
+		result = (A_s.transpose()).dot(result)
+		print("dimensions A_s^T * W_s * A_s * x=" , result.shape)
+		result = (x.transpose()).dot(result)
+		print("dimensions x^T * A_s^T * W_s * A_s * x=" , result.shape)
+		
+		result = result + (x.transpose()).dot(b_s)
+		print("dimensions A_s^T * W_s * A_s * x + x^T * b_s=" , result.shape)
+		
+		
+		return result
+		
+	def compL2DistancesNumPy(self,xVector, R_eq , R_gt , R_lt):
 		"""
 		Helper function to provide an easy to use interface for the fitness function.
 		
