@@ -1,8 +1,13 @@
 import math
 import numpy as np
 import SuperpixelSegmentation
+from HelperFunctions import plotImage,saveImage
 from skimage import io
+from prediction import predict
+import config
+import logging
 
+logger = logging.getLogger("main_logger")
 
 class QuadraticProblem:
 	""" 
@@ -15,20 +20,23 @@ class QuadraticProblem:
 		superpixels				Reference to the segmentation object
 	"""
 	
-	A_gt, A_lt, A_eq, A_s = [None] * 4
-	W_gt, W_lt, W_eq, W_s = [None] * 4
-	b_s = None
-	superpixels = None
 	
-	def __init__(self, superpixels):
+	
+	def __init__(self, superpixels,index,b_s ,p):
+	
+		self.A_gt, self.A_lt, self.A_eq, self.A_s = [None] * 4
+		self.W_gt, self.W_lt, self.W_eq, self.W_s = [None] * 4
+		self.b_s = None
+		self.p = None
+		self.superpixels = None
+		self.imageNumber = index
+		
 		if superpixels is None:
 			raise ValueError('Segmentation setup not initialized! Please first initialize.')
 		
 		self.superpixels = superpixels
-		self.setupEnvironment()
-
-
-		
+		self.setupEnvironment(b_s,p)
+	
 	def getWeigthMatrices(self,nodes, edges, meanLuminances):
 		"""
 		Calculates the diagonal weight matrices. 
@@ -42,32 +50,52 @@ class QuadraticProblem:
 		:return: (weight-matrix greater than, weight-matrix less than,
 				  weight-matrix equal, weight-matrix smoothing)
 		"""
-		print("nodes=",nodes)
-		print("edges=",edges)
+		#print("nodes=",nodes)
+		#print("edges=",edges)
+		
+		image = self.superpixels.imageRaw / 255
 		# load the image and convert it to a greyscale image
-		image = io.imread(self.superpixels.imagePath, as_gray=True)
+		#image = io.imread(self.superpixels.imagePath).astype(dtype=np.float32)/255
+		
+		print("Image shape=", image.shape, image.max(), image.min())
 		
 		numEdges = len(edges)
 		#Intialize weight matrices(size |E|x|E|) with all zeros
-		W_gt = np.zeros([numEdges, numEdges], dtype=float)
-		W_lt = np.zeros([numEdges, numEdges], dtype=float)
-		W_eq = np.zeros([numEdges, numEdges], dtype=float)
-		W_s = np.zeros([numEdges, numEdges], dtype=float)
+		W_gt = np.zeros([numEdges, numEdges], dtype="float32")
+		W_lt = np.zeros([numEdges, numEdges], dtype="float32")
+		W_eq = np.zeros([numEdges, numEdges], dtype="float32")
+		W_s = np.zeros([numEdges, numEdges], dtype="float32")
 		
-		edgeIndex=0
+		
+		list_points_a = list()
+		list_points_b = list()
 		
 		for((x0,y0),(x1,y1)) in edges:
-			(w_gt, w_lt) = self.calc(x0,y0,x1,y1,image)
+			list_points_a.append((x0,y0))
+			list_points_b.append((x1,y1))
+		
+		logger.debug("Number of point pairs for prediction=%d"%len(edges))
+		
+		logger.debug("Calculate weights of edges with pre-trained model:")
+		weights = self.calc(list_points_a,list_points_b,image)
+		
+		var = np.var(weights) #, axis=1) # Computing variance for comparison/testing
+		print("Weight Variances = ", var)
+
+		logger.debug("Calculate weights of edges with pre-trained model done.")
+		print("weights=",weights[1:20])
+		for edgeIndex in range(len(edges)):
+			w_gt = weights[edgeIndex][0]
+			w_lt = weights[edgeIndex][1]
 			
+			if(edgeIndex%200 == 0):
+				logger.debug("weigths of edge %d = ( %f , %f )" ,edgeIndex,w_gt,w_lt)
+				
 			W_gt[edgeIndex][edgeIndex] = w_gt
 			W_lt[edgeIndex][edgeIndex] = w_lt
 			# assumption that equals result form gt and lt
 			W_eq[edgeIndex][edgeIndex] = 1 - abs(w_gt-w_lt)
 		
-			edgeIndex = edgeIndex + 1
-		
-		#Smoothing parameter
-		p = 1
 		
 		#Index of current edge
 		edgeIndex=0
@@ -80,72 +108,144 @@ class QuadraticProblem:
 			lum_p0 = meanLuminances[i_pos]
 			lum_p1 = meanLuminances[j_pos]
 			
-			W_s[edgeIndex][edgeIndex] = math.exp( (-1/p) * (abs( lum_p0 - lum_p1 ))**2 )
+			W_s[edgeIndex][edgeIndex] = math.exp( (-1/self.p) * (abs( lum_p0 - lum_p1 ))**2 )
 			
 			edgeIndex = edgeIndex +1
-			
 		
-			
+		
+		print("W_gt shape:",W_gt.shape)
+		print("W_lt shape:",W_lt.shape)
+		print("W_eq shape:",W_eq.shape)
+		print("W_s shape:",W_s.shape)
+		
 		return (W_gt,W_lt,W_eq,W_s)
-		
-		
-	def getSmoothnessTerm(self):
+	
+	def plotRawWeightData(self):
 		"""
-		Returns the specified smoothing term for more flexibility in smoothing.
+		Used to visualize the raw weight data from the models prediction.
+		Higher values of a node indicate a higher dominance for the greater than property.
+		"""
 		
+		nodes = self.superpixels.nodes
+		edges = self.superpixels.edges
+		
+		greaterThanVisualization = [0]*len(nodes)
+		for edgeIndex in range(len(edges)):
+			(x0,y0),(x1,y1) = edges[edgeIndex]
+			
+			
+			if( self.W_gt[edgeIndex][edgeIndex] > 0.5 ):
+				pos = nodes.index((x0,y0)) 
+				greaterThanVisualization[pos] = greaterThanVisualization[pos] + 1
+			#else:
+			#	pos = nodes.index((x1,y1)) 
+			#	greaterThanVisualization[pos] = greaterThanVisualization[pos] + 1
+		
+		if(max(greaterThanVisualization) == 0):
+			print("Don't plot raw weight data, since all elements in array are zero.")
+			return
+		normVisualization = [i/max(greaterThanVisualization) for i in greaterThanVisualization]
+
+		vImage = self.superpixels.floodfillImage(normVisualization)	
+		
+		print("vImage shape:", vImage.shape)
+		saveImage(vImage, "Visualization Greater Than","%d/visualization_predicted_weights"%self.imageNumber)
+	
+
+	def setSmoothnessParameters(self,b_s, p):
+		"""
+		Sets the specified smoothing term paramter b for more flexibility in smoothing.
+		
+		:param  	b_s smoothing term
+					p smoothing term for weights
 		:return: b_s 	vector/list of size |number nodes|
 		"""
+		logger.debug("Setting smoothing parameters: b_s = %f, p = %f"%(b_s,p))
 		numNodes = len(self.superpixels.nodes)
-		b_s = [1] * numNodes	#TODO: how to compute this term??
+		#b_s_mean = b_s
+		#stdDev = 0.001
+		#self.b_s = np.array( np.random.normal(b_s_mean, stdDev, numNodes), dtype="float32" ) #maybe better with normal distr. initialization ?!
+		self.b_s = [b_s] * numNodes	#TODO: how to compute this term??
+		self.p = p
 		
-		return b_s
 		
-	counter = 0
+	def calc(self,list_a,list_b,image):
+		"""
+		Calculates depth probabilities for all given edges.
+		
+		:param:	list_a	list of points p1
+				list_b	list of points p2
+				image 	target image to infer probabilities
+		
+		:return: list of 2-D tuple (probability p1>p2 ,probability p2>p1)
+		"""
+		# load params
+		params = config.DIWConfig()
+
+		probabilities = list()
+
+		predictions = list()
+
+		#Calculate predictions by calling predict function multiple times,
+		#in order to prevent too big input data (>2GB) tf error
+		
+		for batch in predict(params, image, list_a, list_b):
+			print("batch type", type(batch))
+			print("batch=",batch)
+			predictions.extend(list(batch))
+			print("shape of prediction: ", type(predictions))
+			print("predictions[0]: ",predictions[0])
+
+		for i in range(len(predictions)):
+			probabilities.append(predictions[i]['probabilities'])
+		
+		return probabilities
+		
 	
-	def calc(self,x0,y0,x1,y1,image):
-		"""
-		Calculates depth probabilities between two points.
-		
-		:return: (probability p0>p1 ,probability p1>p0)
-		"""
-		
-		#p1 = self.counter/(len(self.superpixels.segments)*3)
-		#self.counter = self.counter + 1
-		#return (p1,1-p1)
-		
-		return(0.5,0.5)
-		
-	def getSlackVariables(self): 
+	def getSlackVariables(self,mode): 
 		"""
 		Get a test slack variables for each edge. 
 		Computed with different normal distributions.
 		
 		:param: edges list of edges
-		
+				mode  shading/reflectance or depth recovery
+				
 		:return: (slack vector for greater than, slack vector for less than,
 				  slack vector for equals)
 		"""
 		
-		stdDevGT= math.pow(0.001,2)
-		stdDevLT= math.pow(0.001,2)
-		stdDevEQ= math.pow(0.001,2)
+		stdDevGT= None
+		stdDevLT= None
+		stdDevEQ= None
 		
 		meanGT= math.log(2,10)
 		meanLT= math.log(2,10)
 		meanEQ= 0
 		
+		if(mode=="SHADE_REFLECT"):
+			stdDevGT= math.pow(0.001,2)
+			stdDevLT= math.pow(0.001,2)
+			stdDevEQ= math.pow(0.001,2)
+		elif(mode=="DEPTH-RECOVERY"):
+			stdDevGT= math.pow(4,2)
+			stdDevLT= math.pow(4,2)
+			stdDevEQ= math.pow(0.1,2)
+		else:
+			raise ValueError('Please select a valid mode/target.')
+		
 		numEdges = len(self.superpixels.edges)
 	
-		R_gt = np.random.normal(meanGT, stdDevGT, numEdges)
-		R_lt = np.random.normal(meanLT, stdDevLT, numEdges)
-		R_eq = np.random.normal(meanEQ, stdDevEQ, numEdges)
+		R_gt = np.array( np.random.normal(meanGT, stdDevGT, numEdges), dtype="float32" )
+		R_lt = np.array( np.random.normal(meanLT, stdDevLT, numEdges), dtype="float32" )
+		R_eq = np.array( np.random.normal(meanEQ, stdDevEQ, numEdges), dtype="float32" )
+		
 		
 		#R_gt and R_lt should be positive-valued
-		for i in range(numEdges):
-			if R_gt[i] < 0:
-				R_gt[i] = 0
-			if R_lt[i] < 0:
-				R_lt[i] = 0
+		#for i in range(numEdges):
+		#	if R_gt[i] < 0:
+		#		R_gt[i] = 0
+		#	if R_lt[i] < 0:
+		#		R_lt[i] = 0
 		
 		return (R_gt,R_lt,R_eq)
 
@@ -162,9 +262,9 @@ class QuadraticProblem:
 		numNodes = len(nodes)
 		
 		#A_xy : |E| x |N|+|E|
-		A_gt = np.zeros([numEdges, numNodes + numEdges],dtype="float64")
-		A_lt = np.zeros([numEdges, numNodes + numEdges],dtype="float64")
-		A_s = np.zeros([numEdges, numNodes],dtype="float64")
+		A_gt = np.zeros([numEdges, numNodes + numEdges],dtype="float32")
+		A_lt = np.zeros([numEdges, numNodes + numEdges],dtype="float32")
+		A_s = np.zeros([numEdges, numNodes],dtype="float32")
 		
 		#Index of current edge
 		p = 0
@@ -181,11 +281,7 @@ class QuadraticProblem:
 			p = p + 1
 		
 		#Set A_lt = - A_gt
-		for row in range(A_gt.shape[0]):
-			for col in range(A_gt.shape[1]):
-				if(A_lt[row][col]!= 0):
-					A_lt[row][col] = A_gt[row][col] * (-1);
-		
+		A_lt = np.copy((-1)*A_gt)
 		#A_eq == A_gt
 		A_eq = np.copy(A_gt)
 		
@@ -204,6 +300,30 @@ class QuadraticProblem:
 		
 		return (A_gt, A_lt, A_eq, A_s)
 	
+	
+	def setupEnvironment(self, b_s , p):
+		"""
+		Used to init the computation of the segmentation. 
+		Saves the implicit weight and helper matrices locally.
+		
+		:param  	b_s smoothing term
+					p smoothing term for weights
+		"""
+		
+		#Calculates segmentation, superpixel centroids and mean luminances 
+		print("Calculate superpixels..")
+		(nodes,edges,segmentation,meanLuminances) = self.superpixels.calcSegmentation()
+
+		print("Calculate superpixels done.")
+		
+		self.setSmoothnessParameters(b_s, p)
+		
+		print("Computing matrices for optimization formula..")
+		logger.debug("Computing matrices for optimization formula")
+		(self.W_gt, self.W_lt, self.W_eq, self.W_s) = self.getWeigthMatrices(nodes,edges,meanLuminances)
+		(self.A_gt, self.A_lt, self.A_eq, self.A_s) = self.getMatricesA(nodes,edges)
+		print("Computing matrices for optimization formula done.")
+		
 	
 	def runningTests(self):
 		"""
@@ -226,7 +346,7 @@ class QuadraticProblem:
 		print("A_eq= \n", A_eq, "\n")
 		print("A_s= \n", A_s, "\n")
 		
-		W_gt = np.zeros([numEdges, numEdges],dtype="float64")
+		W_gt = np.zeros([numEdges, numEdges],dtype="float32")
 		W_gt[0][0] = 1	#(x0,y0)> (x1,y1)
 		
 		res = self.computeL2Dist(xVector,R_gt,A_gt,W_gt)
@@ -250,7 +370,7 @@ class QuadraticProblem:
 		print("A_eq= \n", A_eq, "\n")
 		print("A_s= \n", A_s, "\n")
 		
-		W_gt = np.zeros([numEdges, numEdges], dtype="float64")
+		W_gt = np.zeros([numEdges, numEdges], dtype="float32")
 		W_gt[0][0] = 0.8	#P1>P2
 		W_gt[1][1] = 0.7	#P2>P3
 		W_gt[2][2] = 0.9	#P3>P4
@@ -269,149 +389,4 @@ class QuadraticProblem:
 		#Test 3: Test e-function calculation
 		#Correct result = 0.999000499833375
 		print("calculation:" ,math.exp( (-1/10) * (abs( 0.8 - 0.9 ))**2 ))
-		
-	def matrixMulTest(self):
-		"""
-		Testing.
-		"""
-		x = [1,0,1,0]
-		x_array = np.array(x)
-		y = [1,2,3,4]
-		y_array = np.array(y)
-		
-		result = x_array.transpose().dot(y)
-		print("x^t * y : ")
-		print(x_array.transpose() , " * " ,y_array , " = " , result )
-	
-	def computeL2DistNumPy(self,xVector,R_xy,A_xy,W_xy):
-		"""
-		Computes the L2 distance between corresponding points(edge).
-		Calculates result by matrix-multiplication from right to left.
-		Resulting formula= [x,R_gt]^T * ( A_gt^T * ( W_gt * ( A_gt * [x,R_gt] )))
-		
-		:param: xVector greyscale values of nodes
-				R_xy 	slack variable for each edge (GT,LT or EQ)
-				A_xy	multiplication help matrix
-				W_xy	weights matrix (GT,LT or EQ)
-				
-		:return: L2 distance
-		"""
-		
-		#xR_xy : |N|+|E| x 1 (vector?)
-		#xVector size = |N| , R_xy size = |E|
-		xR_xy = np.array(xVector + R_xy)
-		
-		#Printing matrices and dimensions
-		print()
-		print("x= \n" , xVector)
-		print("R_xy \n=" , R_xy)
-		print("->xR_xy= \n" , xR_xy)
-		print("A_xy= \n" , A_xy)
-		print("W_xy= \n" , W_xy)
-		
-		print("dimensions x=" , len(xVector))
-		print("dimensions R_xy=" , len(R_xy))
-		print("dimensions xR_xy=" , xR_xy.shape)
-		print("dimensions A_xy=" , A_xy.shape)
-		print("dimensions W_xy=" , W_xy.shape)
-		
-		#Computing dot products
-		result = A_xy.dot(xR_xy)
-		#print("A * xR=" , result)
-		print("dimensions A * xR=" , result.shape)
-		result = W_xy.dot(result)
-		#print("W * A * xR=" , result)
-		print("dimensions W * A * xR=" , result.shape)
-		result = (A_xy.transpose()).dot(result)
-		#print("A^T * W * A * xR=" , result)
-		print("dimensions A^T * W * A * xR=" , result.shape)
-		result = (xR_xy.transpose()).dot(result)
-		#print("xR^T * A^T * W * A * xR=" , result)
-		print("dimensions xR^T * A^T * W * A * xR=" , result.shape)
-		print("->xR=" , xR_xy.transpose())
-		print("result=",result)
-		print()
-		
-		return result
-		
-	def computeSmoothTermNumPy(self,xVector,A_s,W_s,b_s):
-		"""
-		Computes the smoothness term. Allows to enforce smoothness in the image.
-		Calculates result by matrix-multiplication from right to left.
-		Resulting formula= x^T * ( A_s^T * ( W_s * ( A_s * x ))) + x^T * b_s
-		
-		:param:	xVector greyscale values of nodes
-				A_s 	multiplication help matrix
-				W_s 	matrix of smoothness weights
-				b_s		vector (format = list) for more flexible smoothing, size=|N|
-				
-		:return smoothness value
-		"""
-		
-		#Printing matrices and dimensions
-		print()
-		print("x= \n" , xVector)
-		print("A_s= \n" , A_s)
-		print("W_s= \n" , W_s)
-		print("b_s= \n" , b_s)
-		
-		print("dimensions A_s=" , len(A_s))
-		print("dimensions W_s=" , W_s.shape)
-		print("dimensions b_s=" , len(b_s))
-		
-		x = np.array(xVector)
-		
-		result = A_s.dot(x)
-		print("dimensions A_s * x=" , result.shape)
-		result = W_s.dot(result)
-		print("dimensions W_s * A_s * x=" , result.shape)
-		result = (A_s.transpose()).dot(result)
-		print("dimensions A_s^T * W_s * A_s * x=" , result.shape)
-		result = (x.transpose()).dot(result)
-		print("dimensions x^T * A_s^T * W_s * A_s * x=" , result.shape)
-		
-		result = result + (x.transpose()).dot(b_s)
-		print("dimensions A_s^T * W_s * A_s * x + x^T * b_s=" , result.shape)
-		
-		
-		return result
-		
-	def compL2DistancesNumPy(self,xVector, R_eq , R_gt , R_lt):
-		"""
-		Helper function to provide an easy to use interface for the fitness function.
-		
-		:param:	xVector 	numpy vector with greyscale value of each segment
-				R_eq		numpy vector with slack variable for each edge
-				R_gt		numpy vector with slack variable for each edge
-				R_lz		numpy vector with slack variable for each edge
-		
-		:return: L2 distances (L_eq, L_gt, L_lt, L_s)
-		
-		"""
-		
-		L_eq = self.computeL2Dist(xVector, R_eq, self.A_eq, self.W_eq)
-		L_gt = self.computeL2Dist(xVector, R_gt, self.A_gt, self.W_gt)
-		L_lt = self.computeL2Dist(xVector, R_lt, self.A_lt, self.W_lt)
-		L_s = self.computeSmoothTerm(xVector, self.A_s, self.W_s, self.b_s)
-		
-		return (L_eq, L_gt, L_lt, L_s)
-		
-	def setupEnvironment(self):
-		"""
-		Used to init the computation of the segmentation. 
-		Saves the implicit weight and helper matrices locally.
-		"""
-		
-		#Calculates segmentation, superpixel centroids and mean luminances 
-		self.superpixels.calcSegmentation()
-		
-		nodes = self.superpixels.nodes
-		edges = self.superpixels.edges
-		segments = self.superpixels.segments
-		meanLuminances = self.superpixels.meanLuminances
-		
-		(self.W_gt, self.W_lt, self.W_eq, self.W_s) = self.getWeigthMatrices(nodes,edges,meanLuminances)
-		(self.A_gt, self.A_lt, self.A_eq, self.A_s) = self.getMatricesA(nodes,edges)
-		
-		self.b_s= self.getSmoothnessTerm()
-		
+			
